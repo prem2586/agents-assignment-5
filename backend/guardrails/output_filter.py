@@ -36,7 +36,24 @@ def sanitize_output(text: str) -> str:
     Returns:
         Sanitized text with PII masked
     """
-    raise NotImplementedError("TODO: Implement sanitize_output (5 points)")
+    def mask_ssn(match: re.Match) -> str:
+        return "***-**-XXXX"
+
+    def mask_credit_card(match: re.Match) -> str:
+        return "****-****-****-XXXX"
+
+    def mask_email(match: re.Match) -> str:
+        return "[EMAIL REDACTED]"
+
+    def mask_phone(match: re.Match) -> str:
+        return "***-***-XXXX"
+
+    text = PII_PATTERNS["ssn"].sub(mask_ssn, text)
+    text = PII_PATTERNS["credit_card"].sub(mask_credit_card, text)
+    text = PII_PATTERNS["email"].sub(mask_email, text)
+    text = PII_PATTERNS["phone"].sub(mask_phone, text)
+
+    return text
 
 
 def mask_financial_details(text: str) -> str:
@@ -60,4 +77,17 @@ def mask_financial_details(text: str) -> str:
     Returns:
         Text with financial details masked
     """
-    raise NotImplementedError("TODO: Implement mask_financial_details (5 points)")
+    def mask_amount(match: re.Match) -> str:
+        amount = match.group()[1:]
+        integer, separator, decimals = amount.partition(".")
+        digits = integer.replace(",", "")
+        visible = digits[-2:]
+        masked_integer = "*" * max(3, len(digits) - len(visible)) + visible
+        return f"${masked_integer}{separator}{decimals}"
+
+    text = re.sub(r"\$[\d,]+\.?\d*", mask_amount, text)
+    return re.sub(
+        r"\b\d{8,}\b",
+        lambda match: "*" * (len(match.group()) - 4) + match.group()[-4:],
+        text,
+    )

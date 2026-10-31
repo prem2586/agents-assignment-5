@@ -8,6 +8,10 @@ all fields needed for the multi-stage approval process.
 from typing import Optional
 from langgraph.graph import MessagesState
 
+from typing import NotRequired
+
+
+
 
 class ApprovalState(MessagesState):
     """
@@ -41,6 +45,7 @@ class ApprovalState(MessagesState):
     finance_comments: str
     final_approved: Optional[bool]
     final_comments: str
+   
 
     # --- Budget ---
     department_budget: float
@@ -51,3 +56,5 @@ class ApprovalState(MessagesState):
     current_stage: str
     status: str  # "pending", "approved", "rejected", "needs_review"
     decisions: list[dict]
+    parallel_manager_decision: NotRequired[dict | None]
+    parallel_finance_decision: NotRequired[dict | None]

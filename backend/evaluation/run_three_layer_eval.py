@@ -150,7 +150,20 @@ def run_three_layer_evaluation(dataset=None):
         for name, evaluator in evaluators.items():
             if evaluator is None:
                 continue
+            import time
+
+            start = time.perf_counter()
+
+            print(
+                f"Starting evaluator: {getattr(evaluator, '__name__', type(evaluator).__name__)}",
+                flush=True
+            )
             score = _run_evaluator(evaluator, inputs, outputs, expected)
+            print(
+                f"Completed evaluator in "
+                f"{time.perf_counter() - start:.2f}s",
+                flush=True
+            )
             if score is not None:
                 all_scores[name].append(score)
 

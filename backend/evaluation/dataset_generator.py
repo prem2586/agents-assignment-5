@@ -12,6 +12,8 @@ Part 5: Dataset Generation (16 points)
 
 import json
 
+import langsmith
+
 # ---------------------------------------------------------------------------
 # Constants (GIVEN — do not modify)
 # ---------------------------------------------------------------------------
@@ -183,9 +185,27 @@ def generate_eval_dataset(num_cases=10, llm=None):
         dataset = generate_eval_dataset(num_cases=5)
         # Returns: [{"input": {...}, "expected": {...}}, ...]
     """
-    raise NotImplementedError(
-        "TODO: Implement generate_eval_dataset (4 points)"
+    if llm is None:
+      from backend.config import get_llm
+
+      llm = get_llm()
+
+    prompt = GENERATION_PROMPT.format(
+      num_cases=num_cases,
+      departments=", ".join(VALID_DEPARTMENTS),
     )
+    response = llm.invoke(prompt)
+    content = response.text.strip()
+
+    if content.startswith("```"):
+      content = content[content.find("\n") + 1:]
+      if content.rstrip().endswith("```"):
+        content = content.rstrip()[:-3].strip()
+
+    dataset = json.loads(content)
+    if not isinstance(dataset, list):
+      raise ValueError("The generated dataset must be a JSON array")
+    return dataset
 
 
 def generate_edge_cases(num_cases=5, llm=None):
@@ -210,9 +230,27 @@ def generate_edge_cases(num_cases=5, llm=None):
     Returns:
         list[dict]: Generated edge cases matching DATASET_SCHEMA
     """
-    raise NotImplementedError(
-        "TODO: Implement generate_edge_cases (4 points)"
+    if llm is None:
+      from backend.config import get_llm
+
+      llm = get_llm()
+
+    prompt = EDGE_CASE_PROMPT.format(
+      num_cases=num_cases,
+      departments=", ".join(VALID_DEPARTMENTS),
     )
+    response = llm.invoke(prompt)
+    content = response.text.strip()
+
+    if content.startswith("```"):
+      content = content[content.find("\n") + 1:]
+      if content.rstrip().endswith("```"):
+        content = content.rstrip()[:-3].strip()
+
+    dataset = json.loads(content)
+    if not isinstance(dataset, list):
+      raise ValueError("The generated dataset must be a JSON array")
+    return dataset
 
 
 def upload_to_langsmith(dataset, dataset_name="financial-approval-eval"):
@@ -244,9 +282,18 @@ def upload_to_langsmith(dataset, dataset_name="financial-approval-eval"):
     Raises:
         ValueError: If dataset is empty
     """
-    raise NotImplementedError(
-        "TODO: Implement upload_to_langsmith (4 points)"
-    )
+    if not dataset:
+      raise ValueError("dataset must not be empty")
+
+    client = langsmith.Client()
+    ls_dataset = client.create_dataset(dataset_name=dataset_name)
+    for case in dataset:
+      client.create_example(
+        inputs=case["input"],
+        outputs=case["expected"],
+        dataset_id=ls_dataset.id,
+      )
+    return str(ls_dataset.id)
 
 
 def validate_generated_dataset(dataset):
@@ -282,6 +329,70 @@ def validate_generated_dataset(dataset):
         valid, errors = validate_generated_dataset([{"input": {}, "expected": {}}])
         # valid = False, errors = ["Case 1: input missing 'request_id'", ...]
     """
-    raise NotImplementedError(
-        "TODO: Implement validate_generated_dataset (4 points)"
+    errors = []
+    if not isinstance(dataset, list):
+      return False, ["Dataset must be a list"]
+    if not dataset:
+      return False, ["Dataset must not be empty"]
+
+    input_fields = (
+      "request_id", "title", "description", "amount", "department",
+      "requester", "justification", "priority",
     )
+    expected_fields = ("risk_level", "status", "approval_path", "human_reviews")
+
+    for index, case in enumerate(dataset, start=1):
+      prefix = f"Case {index}:"
+      if not isinstance(case, dict):
+        errors.append(f"{prefix} entry must be an object")
+        continue
+
+      sections = {}
+      for name, fields in (("input", input_fields), ("expected", expected_fields)):
+        if name not in case:
+          errors.append(f"{prefix} missing '{name}'")
+          continue
+        section = case[name]
+        if not isinstance(section, dict):
+          errors.append(f"{prefix} '{name}' must be an object")
+          continue
+        sections[name] = section
+        for field in fields:
+          if field not in section:
+            errors.append(f"{prefix} {name} missing '{field}'")
+
+      input_data = sections.get("input")
+      expected = sections.get("expected")
+      if input_data is not None and "amount" in input_data:
+        amount = input_data["amount"]
+        if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+          errors.append(f"{prefix} input 'amount' must be a number")
+      if input_data is not None and "department" in input_data:
+        if input_data["department"] not in VALID_DEPARTMENTS:
+          errors.append(
+            f"{prefix} input 'department' must be one of {VALID_DEPARTMENTS}"
+          )
+
+      if expected is None:
+        continue
+      approval_path = expected.get("approval_path")
+      if not isinstance(approval_path, list):
+        errors.append(f"{prefix} expected 'approval_path' must be a list")
+
+      if "risk_level" in expected:
+        risk_level = expected["risk_level"]
+        allowed_risk = risk_level in ("low", "medium", "high", "critical")
+        may_be_none = risk_level is None and isinstance(approval_path, list) and "assess_risk" not in approval_path
+        if not allowed_risk and not may_be_none:
+          errors.append(
+            f"{prefix} expected 'risk_level' must be low, medium, high, critical, "
+            "or None when approval_path skips 'assess_risk'"
+          )
+      if "status" in expected and expected["status"] not in ("approved", "rejected"):
+        errors.append(f"{prefix} expected 'status' must be 'approved' or 'rejected'")
+      if "human_reviews" in expected:
+        reviews = expected["human_reviews"]
+        if isinstance(reviews, bool) or not isinstance(reviews, int) or reviews < 0:
+          errors.append(f"{prefix} expected 'human_reviews' must be an int >= 0")
+
+    return not errors, errors

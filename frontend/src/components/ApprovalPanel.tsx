@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useLangGraphInterrupt } from "@copilotkit/react-core";
+import {
+  useLangGraphInterrupt,
+  useThreads,
+} from "@copilotkit/react-core";
 import { InterruptData, ApprovalDecision } from "@/lib/types";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -179,11 +182,228 @@ function ApprovalModal({
   );
 }
 
-export default function ApprovalPanel() {
+/*export default function ApprovalPanel() {
   useLangGraphInterrupt({
     render: ({ event, resolve }) => {
       const data = event.value as InterruptData;
       return <ApprovalModal data={data} resolve={resolve} />;
+    },
+  });
+
+  return null;
+}
+ */
+
+const submitParallelApprovals = async (
+  threadId: string,
+  managerDecision: { approved: boolean; comments: string },
+  financeDecision: { approved: boolean; comments: string }
+) => {
+  const response = await fetch(
+    "http://localhost:8000/parallel-approval",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        thread_id: threadId,
+        manager: managerDecision,
+        finance: financeDecision,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error("Parallel approval failed");
+  }
+
+  return response.json();
+};
+
+function ParallelApprovalModal({
+  data,
+  threadId,
+}: {
+  data: InterruptData;
+  threadId: string;
+}) {
+  const [managerApproved, setManagerApproved] = useState<boolean | null>(null);
+  const [financeApproved, setFinanceApproved] = useState<boolean | null>(null);
+  const [managerComments, setManagerComments] = useState("");
+  const [financeComments, setFinanceComments] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    if (
+      managerApproved === null ||
+      financeApproved === null ||
+      submitting ||
+      submitted
+    ) return;
+
+    setSubmitting(true);
+    setError("");
+    try {
+      const threadId = (
+      data as InterruptData & { thread_id?: string }
+      ).thread_id;
+
+        if (!threadId) {
+          throw new Error(
+            "LangGraph thread ID is missing. Cannot submit parallel approvals."
+          );
+        }
+
+        const result = await submitParallelApprovals(
+          threadId,
+          {
+            approved: managerApproved,
+            comments: managerComments,
+          },
+          {
+            approved: financeApproved,
+            comments: financeComments,
+          }
+        );
+
+        console.log("Parallel approval result:", result);
+
+        window.dispatchEvent(
+          new CustomEvent("approval-completed", {
+            detail: result,
+          })
+        );
+
+        setSubmitted(true);
+      } catch (error) {
+        console.error("Parallel approval error:", error);
+
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Unable to submit parallel approvals."
+        );
+          } finally {
+        setSubmitting(false);
+          }
+  };
+
+  const decisionButtons = (
+    label: string,
+    value: boolean | null,
+    onChange: (approved: boolean) => void
+  ) => (
+    <div>
+      <p className="text-sm font-semibold text-gray-700 mb-2">{label}</p>
+      <div className="flex gap-3">
+        <button
+          type="button"
+          aria-pressed={value === true}
+          onClick={() => onChange(true)}
+          className={`flex-1 py-2 rounded-lg font-semibold ${value === true ? "bg-green-600 text-white" : "bg-green-100 text-green-700"}`}
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          aria-pressed={value === false}
+          onClick={() => onChange(false)}
+          className={`flex-1 py-2 rounded-lg font-semibold ${value === false ? "bg-red-600 text-white" : "bg-red-100 text-red-700"}`}
+        >
+          Reject
+        </button>
+      </div>
+    </div>
+  );
+
+  if (submitted) {
+   return null;
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+        <div className="bg-orange-600 text-white px-6 py-4 rounded-t-xl">
+          <h2 className="text-xl font-bold">Parallel Approval</h2>
+          <p className="text-orange-100 text-sm mt-1">Manager and Finance decisions are required</p>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Request</p>
+            <p className="font-semibold text-gray-900">{data.title}</p>
+            <p className="text-sm text-gray-600">
+              {data.request_id} · ${data.amount?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+          {decisionButtons("Manager Decision", managerApproved, setManagerApproved)}
+          <textarea
+            aria-label="Manager comments"
+            value={managerComments}
+            onChange={(event) => setManagerComments(event.target.value)}
+            placeholder="Manager comments..."
+            className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none"
+            rows={2}
+          />
+          {decisionButtons("Finance Decision", financeApproved, setFinanceApproved)}
+          <textarea
+            aria-label="Finance comments"
+            value={financeComments}
+            onChange={(event) => setFinanceComments(event.target.value)}
+            placeholder="Finance comments..."
+            className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none"
+            rows={2}
+          />
+          {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={managerApproved === null || financeApproved === null || submitting || submitted}
+            className="w-full py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {submitting
+              ? "Submitting..."
+              : submitted
+                ? "Decisions Submitted"
+                : "Submit Both Decisions"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ApprovalPanel() {
+  const { threadId } = useThreads();
+
+  console.log("[ApprovalPanel] CopilotKit threadId:", threadId);
+
+  useLangGraphInterrupt({
+    render: ({ event, resolve }) => {
+      const data = event.value as InterruptData;
+
+      if (
+        data.risk_level === "high" &&
+        ["manager_review", "finance_review"].includes(data.type)
+      ) {
+        return (
+          <ParallelApprovalModal
+            key={`${data.request_id}-parallel`}
+            data={data}
+            threadId={threadId}
+          />
+        );
+      }
+
+      return (
+        <ApprovalModal
+          key={`${data.request_id}-${data.type}`}
+          data={data}
+          resolve={resolve}
+        />
+      );
     },
   });
 

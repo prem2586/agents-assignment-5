@@ -25,6 +25,10 @@ from backend.agent.nodes import (
     route_after_budget,
     route_after_finance,
     route_after_final,
+    parallel_manager_review,
+    parallel_finance_review,
+    join_parallel_reviews,
+    route_after_parallel_reviews,
 )
 
 
@@ -73,4 +77,123 @@ def create_approval_graph(checkpointer=None):
     Returns:
         Compiled StateGraph ready for execution
     """
-    raise NotImplementedError("TODO: Implement create_approval_graph (10 points)")
+
+    builder = StateGraph(ApprovalState)
+
+    # Register nodes
+    builder.add_node("submit_request", submit_request)
+    builder.add_node("assess_risk", assess_risk)
+    builder.add_node("manager_review", manager_review)
+    builder.add_node("validate_budget", validate_budget)
+    builder.add_node("finance_review", finance_review)
+    builder.add_node("final_signoff", final_signoff)
+    builder.add_node("process_request", process_request)
+    builder.add_node("handle_rejection", handle_rejection)
+    builder.add_node("parallel_manager_review",parallel_manager_review)
+    builder.add_node("parallel_finance_review",parallel_finance_review)
+    builder.add_node("join_parallel_reviews",join_parallel_reviews)
+
+    builder.add_edge(START, "submit_request")
+
+    builder.add_conditional_edges(
+        "submit_request",
+        route_after_submission,
+        {
+            "assess_risk": "assess_risk",
+            "handle_rejection": "handle_rejection",
+        },
+    )
+
+    """ builder.add_conditional_edges(
+        "assess_risk",
+        route_after_risk,
+        {
+            "validate_budget": "validate_budget",
+            "manager_review": "manager_review",
+        },
+    ) """
+
+    builder.add_conditional_edges(
+        "assess_risk",
+        route_risk_with_parallel,
+        {
+            "validate_budget": "validate_budget",
+            "manager_review": "manager_review",
+            "parallel_manager_review": "parallel_manager_review",
+            "parallel_finance_review": "parallel_finance_review",
+        },
+    )
+
+    builder.add_edge(
+        ["parallel_manager_review", "parallel_finance_review"],
+        "join_parallel_reviews",
+    )
+
+    builder.add_conditional_edges(
+        "join_parallel_reviews",
+        route_after_parallel_reviews,
+        {
+            "process_request": "process_request",
+            "handle_rejection": "handle_rejection",
+        },
+    )
+
+    builder.add_conditional_edges(
+        "manager_review",
+        route_after_manager,
+        {
+            "process_request": "process_request",
+            "validate_budget": "validate_budget",
+            "finance_review": "finance_review",
+            "handle_rejection": "handle_rejection",
+        },
+    )
+
+    builder.add_conditional_edges(
+        "validate_budget",
+        route_after_budget,
+        {
+            "process_request": "process_request",
+            "manager_review": "manager_review",
+            "finance_review": "finance_review",
+        },
+    )
+
+    builder.add_conditional_edges(
+        "finance_review",
+        route_after_finance,
+        {
+            "process_request": "process_request",
+            "final_signoff": "final_signoff",
+            "handle_rejection": "handle_rejection",
+        },
+    )
+
+    builder.add_conditional_edges(
+        "final_signoff",
+        route_after_final,
+        {
+            "process_request": "process_request",
+            "handle_rejection": "handle_rejection",
+        },
+    )
+
+    builder.add_edge("process_request", END)
+    builder.add_edge("handle_rejection", END)
+
+    return builder.compile(checkpointer=checkpointer) 
+
+def route_risk_with_parallel(state: ApprovalState):
+    risk = state.get("risk_level")
+
+    if risk == "low":
+        return "validate_budget"
+
+    if risk == "high":
+        return [
+            "parallel_manager_review",
+            "parallel_finance_review",
+        ]
+
+    # Medium and critical retain existing sequential routing
+    return "manager_review"

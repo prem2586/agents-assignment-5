@@ -52,7 +52,27 @@ def validate_request(
     Returns:
         Tuple of (is_valid, message)
     """
-    raise NotImplementedError("TODO: Implement validate_request (5 points)")
+
+    amount_valid, amount_message = validate_amount(amount)
+    if not amount_valid:
+        return False, amount_message
+
+    if department not in VALID_DEPARTMENTS:
+        return False, f"Invalid department: {department}"
+
+    title_valid, title_message = sanitize_text(title, "title")
+    if not title_valid:
+        return False, title_message
+
+    description_valid, description_message = sanitize_text(description, "description")
+    if not description_valid:
+        return False, description_message
+
+    justification_valid, justification_message = sanitize_text(justification, "justification")
+    if not justification_valid:
+        return False, justification_message
+
+    return True, "Request validated successfully"
 
 
 def validate_amount(amount: float) -> tuple[bool, str]:
@@ -70,8 +90,11 @@ def validate_amount(amount: float) -> tuple[bool, str]:
     Returns:
         Tuple of (is_valid, message)
     """
-    raise NotImplementedError("TODO: Implement validate_amount (2 points)")
-
+    if amount <= 0:
+        return False, "Amount must be positive"
+    if amount > BUDGET_CEILING:
+        return False, f"Amount exceeds budget ceiling of ${BUDGET_CEILING:,.2f}"
+    return True, "Amount is valid"
 
 def sanitize_text(text: str, field_name: str = "text") -> tuple[bool, str]:
     """
@@ -90,4 +113,8 @@ def sanitize_text(text: str, field_name: str = "text") -> tuple[bool, str]:
     Returns:
         Tuple of (is_safe, original_text_or_error_message)
     """
-    raise NotImplementedError("TODO: Implement sanitize_text (3 points)")
+    lower_text = text.lower()
+    for pattern in BLOCKED_PATTERNS:
+        if pattern in lower_text:
+            return False, f"Blocked content detected in {field_name}: suspicious pattern"
+    return True, text
